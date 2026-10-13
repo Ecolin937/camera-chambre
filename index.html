@@ -57,10 +57,29 @@
       font-size: 14px;
       color: #aaa;
     }
-    video {
+    
+    /* Zone vidéo avec superposition du cadre */
+    .video-wrapper {
+      position: relative;
       width: 100%;
       border-radius: 8px;
+      overflow: hidden;
       background: #000;
+      aspect-ratio: 4 / 3;
+    }
+    .video-wrapper video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .video-wrapper canvas.overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
     }
   </style>
 </head>
@@ -83,10 +102,12 @@
 
   <div id="status">Choisis un mode pour commencer</div>
 
-  <!-- Conteneur caméra locale -->
+  <!-- Conteneur caméra locale (téléphone/tablette) -->
   <div id="local-preview" style="display:none; max-width: 400px; margin: 0 auto;">
-    <video id="flux-local" autoplay playsinline muted></video>
-    <canvas id="canvas" width="128" height="96" style="display:none;"></canvas>
+    <div class="video-wrapper">
+      <video id="flux-local" autoplay playsinline muted></video>
+    </div>
+    <canvas id="canvas-analysis" width="128" height="96" style="display:none;"></canvas>
   </div>
 
   <!-- Grille des caméras reçues sur le PC -->
@@ -126,6 +147,47 @@
       const btn = document.getElementById("btn-toggle-sound");
       btn.innerText = sonActive ? "🔊 Son : Activé" : "🔇 Son : Coupé";
       btn.classList.toggle("btn-disabled", !sonActive);
+    }
+
+    // Dessin du cadre de ciblage par-dessus la vidéo du PC
+    function dessinerCadre(peerId, box) {
+      const canvasOverlay = document.getElementById(`overlay-${peerId}`);
+      if (!canvasOverlay) return;
+      const ctx = canvasOverlay.getContext("2d");
+      ctx.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+
+      if (!box) return;
+
+      const scaleX = canvasOverlay.width / 128;
+      const scaleY = canvasOverlay.height / 96;
+
+      const x = box.minX * scaleX;
+      const y = box.minY * scaleY;
+      const w = (box.maxX - box.minX) * scaleX;
+      const h = (box.maxY - box.minY) * scaleY;
+
+      // Cadre rouge
+      ctx.strokeStyle = "#ff3333";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, w, h);
+
+      // Coins de ciblage
+      const corner = Math.min(12, w / 4, h / 4);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(x, y + corner); ctx.lineTo(x, y); ctx.lineTo(x + corner, y);
+      ctx.moveTo(x + w - corner, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + corner);
+      ctx.moveTo(x, y + h - corner); ctx.lineTo(x, y + h); ctx.lineTo(x + corner, y + h);
+      ctx.moveTo(x + w - corner, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - corner);
+      ctx.stroke();
+
+      // Effacer automatiquement après 1 seconde si plus de mouvement
+      clearTimeout(canvasOverlay.clearTimer);
+      canvasOverlay.clearTimer = setTimeout(() => {
+        ctx.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+      }, 1000);
     }
 
     // ==============================================================
@@ -168,6 +230,10 @@
             jouerBip();
             declencherFlashEcran();
 
+            if (data.box) {
+              dessinerCadre(peerId, data.box);
+            }
+
             setTimeout(() => {
               status.innerText = "💻 Surveillance active...";
             }, 2500);
@@ -202,7 +268,10 @@
             <span id="title-${peerId}" style="font-weight:bold; color:#fff;">Caméra ${count}</span>
             <span id="bat-${peerId}">🔋 --%</span>
           </div>
-          <video id="video-${peerId}" autoplay playsinline></video>
+          <div class="video-wrapper">
+            <video id="video-${peerId}" autoplay playsinline></video>
+            <canvas id="overlay-${peerId}" class="overlay" width="480" height="360"></canvas>
+          </div>
           <div style="margin-top: 10px;">
             <button class="btn-flash" onclick="basculerFlash('${peerId}')">🔦 Allumer/Éteindre Flash</button>
           </div>
@@ -269,31 +338,49 @@
             }
           });
 
-          const canvas = document.getElementById("canvas");
+          const canvas = document.getElementById("canvas-analysis");
           const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
           setInterval(() => {
             if (video.readyState < 2) return;
 
-            ctx.drawImage(video, 0, 0, 128, 96);
-            const imageActuelle = ctx.getImageData(0, 0, 128, 96).data;
+            const W = 128;
+            const H = 96;
+            ctx.drawImage(video, 0, 0, W, H);
+            const imageActuelle = ctx.getImageData(0, 0, W, H).data;
 
             if (dernierFlux) {
               let scoreDiff = 0;
+              let minX = W, maxX = 0, minY = H, maxY = 0;
+
               for (let i = 0; i < imageActuelle.length; i += 4) {
                 const diff = Math.abs(imageActuelle[i] - dernierFlux[i]);
-                if (diff > 25) scoreDiff++;
+                if (diff > 25) {
+                  scoreDiff++;
+                  const pixelIndex = i / 4;
+                  const px = pixelIndex % W;
+                  const py = Math.floor(pixelIndex / W);
+
+                  if (px < minX) minX = px;
+                  if (px > maxX) maxX = px;
+                  if (py < minY) minY = py;
+                  if (py > maxY) maxY = py;
+                }
               }
 
               if (scoreDiff > 50 && !antiSpam) {
                 antiSpam = true;
                 status.innerHTML = "<span class='alert'>⚠️ Mouvement détecté ! Signal envoyé...</span>";
-                conn.send({ type: "MOUVEMENT" });
+                
+                conn.send({
+                  type: "MOUVEMENT",
+                  box: { minX, maxX, minY, maxY }
+                });
 
                 setTimeout(() => {
                   antiSpam = false;
                   status.innerText = "📱 En direct. Surveillance active...";
-                }, 3000);
+                }, 2000);
               }
             }
             dernierFlux = imageActuelle;
