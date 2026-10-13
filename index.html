@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caméra Surveillance & Alarme</title>
+  <!-- PeerJS pour la vidéo en direct -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; margin: 0; padding: 20px; }
+    button { padding: 14px 22px; font-size: 16px; margin: 10px; cursor: pointer; border-radius: 8px; border: none; font-weight: bold; }
+    video { width: 95%; max-width: 500px; border-radius: 10px; background: #000; margin-top: 15px; }
+    #status { font-size: 18px; margin-top: 15px; font-weight: bold; }
+    .alert { color: #ff3333; }
+  </style>
+</head>
+<body>
+
+  <h1>📹 Surveillance Chambre</h1>
+
+  <div id="setup">
+    <button onclick="demarrerTelephone()" style="background: #2563eb; color: #fff;">📱 Mode Téléphone (Porte)</button>
+    <button onclick="demarrerPC()" style="background: #10b981; color: #fff;">💻 Mode PC (Bureau)</button>
+  </div>
+
+  <div id="status">Choisis un mode pour commencer</div>
+
+  <!-- Affichage vidéo -->
+  <div id="video-container" style="display:none;">
+    <video id="flux-video" autoplay playsinline></video>
+    <canvas id="canvas" width="64" height="48" style="display:none;"></canvas>
+  </div>
+
+  <script>
+    // Identifiant unique pour relier les deux appareils
+    const ROOM_ID = "alarme-chambre-perso-2026";
+    let peer = null;
+
+    // Fonction pour générer le BIP sonore sur le PC
+    function jouerBip() {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      osc.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.35);
+    }
+
+    // ====================== MODE PC (RÉCEPTEUR) ======================
+    function demarrerPC() {
+      document.getElementById("setup").style.display = "none";
+      document.getElementById("video-container").style.display = "block";
+      const status = document.getElementById("status");
+      status.innerText = "💻 En attente de connexion du téléphone...";
+
+      jouerBip(); // Autorise le son sur le navigateur
+
+      // Le PC prend l'ID fixe
+      peer = new Peer(ROOM_ID);
+
+      // Réception de l'appel vidéo
+      peer.on("call", (call) => {
+        status.innerText = "💻 Téléphone connecté ! Flux vidéo en direct actif.";
+        call.answer(); // Répond à l'appel
+        call.on("stream", (remoteStream) => {
+          const video = document.getElementById("flux-video");
+          video.srcObject = remoteStream;
+        });
+      });
+
+      // Réception du signal de mouvement
+      peer.on("connection", (conn) => {
+        conn.on("data", (data) => {
+          if (data === "MOUVEMENT") {
+            status.innerHTML = "<span class='alert'>🚨 MOUVEMENT DÉTECTÉ À LA PORTE !</span>";
+            jouerBip();
+            setTimeout(() => {
+              status.innerText = "💻 Surveillance active...";
+            }, 2500);
+          }
+        });
+      });
+
+      peer.on("error", (err) => {
+        console.error(err);
+        if (err.type === "unavailable-id") {
+          status.innerText = "⚠️ Erreur : l'ID est déjà utilisé. Recharge la page.";
+        }
+      });
+    }
+
+    // ====================== MODE TÉLÉPHONE (CAMÉRA) ======================
+    let dernierFlux = null;
+    let antiSpam = false;
+
+    async function demarrerTelephone() {
+      document.getElementById("setup").style.display = "none";
+      document.getElementById("video-container").style.display = "block";
+      const status = document.getElementById("status");
+      status.innerText = "📱 Connexion en cours...";
+
+      const video = document.getElementById("flux-video");
+      video.muted = true; // Pas d'écho sur le téléphone
+
+      // 1. Accès à la caméra arrière
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false
+      });
+      video.srcObject = stream;
+
+      // 2. Connexion PeerJS vers le PC
+      peer = new Peer();
+
+      peer.on("open", () => {
+        status.innerText = "📱 Connecté au réseau. Appel du PC...";
+        
+        // Appelle le PC avec le flux vidéo
+        peer.call(ROOM_ID, stream);
+
+        // Ouvre le canal de données pour l'alerte
+        const conn = peer.connect(ROOM_ID);
+
+        conn.on("open", () => {
+          status.innerText = "📱 En direct ! Pose le téléphone face à la porte.";
+
+          // 3. Détection de mouvement locale
+          const canvas = document.getElementById("canvas");
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+          setInterval(() => {
+            if (video.readyState < 2) return;
+
+            ctx.drawImage(video, 0, 0, 64, 48);
+            const imageActuelle = ctx.getImageData(0, 0, 64, 48).data;
+
+            if (dernierFlux) {
+              let scoreDiff = 0;
+              for (let i = 0; i < imageActuelle.length; i += 4) {
+                const diff = Math.abs(imageActuelle[i] - dernierFlux[i]);
+                if (diff > 40) scoreDiff++;
+              }
+
+              // Déclenchement de l'alerte si mouvement
+              if (scoreDiff > 150 && !antiSpam) {
+                antiSpam = true;
+                status.innerHTML = "<span class='alert'>⚠️ Mouvement ! Alerte envoyée au PC.</span>";
+                conn.send("MOUVEMENT");
+
+                setTimeout(() => {
+                  antiSpam = false;
+                  status.innerText = "📱 En direct. Surveillance active...";
+                }, 3000);
+              }
+            }
+            dernierFlux = imageActuelle;
+          }, 150);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
