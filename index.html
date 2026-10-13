@@ -3,38 +3,105 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Caméra Surveillance & Alarme</title>
+  <title>Surveillance Multi-Caméras & Alarme</title>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <style>
     body { font-family: sans-serif; text-align: center; background: #121212; color: #fff; margin: 0; padding: 20px; }
-    button { padding: 14px 22px; font-size: 16px; margin: 10px; cursor: pointer; border-radius: 8px; border: none; font-weight: bold; }
-    video { width: 95%; max-width: 500px; border-radius: 10px; background: #000; margin-top: 15px; }
-    #status { font-size: 18px; margin-top: 15px; font-weight: bold; }
+    button { padding: 12px 20px; font-size: 16px; margin: 8px; cursor: pointer; border-radius: 8px; border: none; font-weight: bold; }
+    .btn-pc { background: #10b981; color: #fff; }
+    .btn-cam { background: #2563eb; color: #fff; }
+    .btn-flash { background: #eab308; color: #000; padding: 8px 14px; font-size: 14px; }
+    .btn-ctrl { background: #374151; color: #fff; padding: 10px 16px; font-size: 14px; }
+    .btn-disabled { background: #991b1b !important; }
+    #status { font-size: 18px; margin: 15px 0; font-weight: bold; }
     .alert { color: #ff3333; }
+
+    /* Flash rouge translucide sur tout l'écran */
+    #red-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(255, 60, 60, 0.35);
+      pointer-events: none;
+      opacity: 0;
+      z-index: 9999;
+      transition: opacity 0.15s ease-in-out;
+    }
+    .flash-active {
+      opacity: 1 !important;
+    }
+    
+    /* Grille multi-caméras sur PC */
+    #cameras-grid {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .cam-card {
+      background: #1e1e1e;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 12px;
+      width: 90%;
+      max-width: 480px;
+    }
+    .cam-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #aaa;
+    }
+    video {
+      width: 100%;
+      border-radius: 8px;
+      background: #000;
+    }
   </style>
 </head>
 <body>
 
-  <h1>📹 Surveillance Chambre</h1>
+  <!-- Calque rouge pour le flash -->
+  <div id="red-overlay"></div>
+
+  <h1>📹 Surveillance Multi-Caméras</h1>
 
   <div id="setup">
-    <button onclick="demarrerTelephone()" style="background: #2563eb; color: #fff;">📱 Mode Téléphone (Porte)</button>
-    <button onclick="demarrerPC()" style="background: #10b981; color: #fff;">💻 Mode PC (Bureau)</button>
+    <button class="btn-cam" onclick="demarrerCamera()">📱/📟 Mode Caméra (Téléphone ou Tablette)</button>
+    <button class="btn-pc" onclick="demarrerPC()">💻 Mode PC (Écran de contrôle)</button>
+  </div>
+
+  <!-- Barre de contrôle PC -->
+  <div id="pc-controls" style="display:none; margin-bottom: 10px;">
+    <button id="btn-toggle-sound" class="btn-ctrl" onclick="toggleSon()">🔊 Son : Activé</button>
   </div>
 
   <div id="status">Choisis un mode pour commencer</div>
 
-  <div id="video-container" style="display:none;">
-    <video id="flux-video" autoplay playsinline></video>
-    <!-- Résolution d'analyse augmentée à 128x96 pour capter les détails plus loin -->
+  <!-- Conteneur caméra locale -->
+  <div id="local-preview" style="display:none; max-width: 400px; margin: 0 auto;">
+    <video id="flux-local" autoplay playsinline muted></video>
     <canvas id="canvas" width="128" height="96" style="display:none;"></canvas>
   </div>
+
+  <!-- Grille des caméras reçues sur le PC -->
+  <div id="cameras-grid" style="display:none;"></div>
 
   <script>
     const ROOM_ID = "alarme-chambre-perso-2026";
     let peer = null;
+    const connections = {};
 
+    let sonActive = true;
+
+    // Bip sonore conservé
     function jouerBip() {
+      if (!sonActive) return;
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const osc = audioCtx.createOscillator();
       osc.type = "sine";
@@ -44,57 +111,129 @@
       osc.stop(audioCtx.currentTime + 0.35);
     }
 
-    // ====================== MODE PC ======================
+    // Flash rouge sur l'écran
+    function declencherFlashEcran() {
+      const overlay = document.getElementById("red-overlay");
+      overlay.classList.add("flash-active");
+      setTimeout(() => overlay.classList.remove("flash-active"), 200);
+      setTimeout(() => overlay.classList.add("flash-active"), 400);
+      setTimeout(() => overlay.classList.remove("flash-active"), 650);
+    }
+
+    // Gestion du son On/Off
+    function toggleSon() {
+      sonActive = !sonActive;
+      const btn = document.getElementById("btn-toggle-sound");
+      btn.innerText = sonActive ? "🔊 Son : Activé" : "🔇 Son : Coupé";
+      btn.classList.toggle("btn-disabled", !sonActive);
+    }
+
+    // ==============================================================
+    // ========================== MODE PC ===========================
+    // ==============================================================
     function demarrerPC() {
       document.getElementById("setup").style.display = "none";
-      document.getElementById("video-container").style.display = "block";
+      document.getElementById("pc-controls").style.display = "block";
+      document.getElementById("cameras-grid").style.display = "flex";
       const status = document.getElementById("status");
-      status.innerText = "💻 En attente de connexion du téléphone...";
+      status.innerText = "💻 En attente de connexion des appareils...";
 
       jouerBip();
 
       peer = new Peer(ROOM_ID);
 
       peer.on("call", (call) => {
-        status.innerText = "💻 Téléphone connecté ! Flux vidéo en direct actif.";
+        const peerId = call.peer;
         call.answer();
+
         call.on("stream", (remoteStream) => {
-          const video = document.getElementById("flux-video");
-          video.srcObject = remoteStream;
+          creerOuMettreAJourEcran(peerId, remoteStream);
+          status.innerText = "💻 Surveillance active. Appareils connectés !";
         });
       });
 
       peer.on("connection", (conn) => {
+        const peerId = conn.peer;
+        connections[peerId] = conn;
+
         conn.on("data", (data) => {
-          if (data === "MOUVEMENT") {
-            status.innerHTML = "<span class='alert'>🚨 MOUVEMENT DÉTECTÉ À LA PORTE !</span>";
+          if (data && data.type === "BATTERY") {
+            const batEl = document.getElementById(`bat-${peerId}`);
+            if (batEl) batEl.innerText = `🔋 ${data.level}%`;
+          }
+
+          if (data && data.type === "MOUVEMENT") {
+            const nomAppareil = document.getElementById(`title-${peerId}`)?.innerText || "Une caméra";
+            status.innerHTML = `<span class='alert'>🚨 MOUVEMENT SUR : ${nomAppareil} !</span>`;
             jouerBip();
+            declencherFlashEcran();
+
             setTimeout(() => {
               status.innerText = "💻 Surveillance active...";
             }, 2500);
           }
+        });
+
+        conn.on("close", () => {
+          const card = document.getElementById(`card-${peerId}`);
+          if (card) card.remove();
+          delete connections[peerId];
         });
       });
 
       peer.on("error", (err) => {
         console.error(err);
         if (err.type === "unavailable-id") {
-          status.innerText = "⚠️ Erreur : l'ID est déjà utilisé. Recharge la page.";
+          status.innerText = "⚠️ Erreur : ID déjà occupé. Recharge la page.";
         }
       });
     }
 
-    // ====================== MODE TÉLÉPHONE ======================
+    function creerOuMettreAJourEcran(peerId, stream) {
+      let card = document.getElementById(`card-${peerId}`);
+      if (!card) {
+        const count = document.querySelectorAll(".cam-card").length + 1;
+        card = document.createElement("div");
+        card.className = "cam-card";
+        card.id = `card-${peerId}`;
+
+        card.innerHTML = `
+          <div class="cam-header">
+            <span id="title-${peerId}" style="font-weight:bold; color:#fff;">Caméra ${count}</span>
+            <span id="bat-${peerId}">🔋 --%</span>
+          </div>
+          <video id="video-${peerId}" autoplay playsinline></video>
+          <div style="margin-top: 10px;">
+            <button class="btn-flash" onclick="basculerFlash('${peerId}')">🔦 Allumer/Éteindre Flash</button>
+          </div>
+        `;
+        document.getElementById("cameras-grid").appendChild(card);
+      }
+      const vid = document.getElementById(`video-${peerId}`);
+      vid.srcObject = stream;
+    }
+
+    function basculerFlash(peerId) {
+      if (connections[peerId]) {
+        connections[peerId].send({ type: "TOGGLE_FLASH" });
+      }
+    }
+
+    // ==============================================================
+    // =================== MODE CAMÉRA (TÉL / TAB) ==================
+    // ==============================================================
+    let trackVideo = null;
+    let flashAllume = false;
     let dernierFlux = null;
     let antiSpam = false;
 
-    async function demarrerTelephone() {
+    async function demarrerCamera() {
       document.getElementById("setup").style.display = "none";
-      document.getElementById("video-container").style.display = "block";
+      document.getElementById("local-preview").style.display = "block";
       const status = document.getElementById("status");
       status.innerText = "📱 Connexion en cours...";
 
-      const video = document.getElementById("flux-video");
+      const video = document.getElementById("flux-local");
       video.muted = true;
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -102,17 +241,33 @@
         audio: false
       });
       video.srcObject = stream;
+      trackVideo = stream.getVideoTracks()[0];
 
       peer = new Peer();
 
       peer.on("open", () => {
-        status.innerText = "📱 Connecté au réseau. Appel du PC...";
-        
+        status.innerText = "📱 Relié au réseau. Appel du PC...";
+
         peer.call(ROOM_ID, stream);
         const conn = peer.connect(ROOM_ID);
 
         conn.on("open", () => {
-          status.innerText = "📱 En direct ! Pose le téléphone face à la porte.";
+          status.innerText = "📱 En direct ! Pose l'appareil face à la zone.";
+
+          envoyerBatterie(conn);
+
+          conn.on("data", async (msg) => {
+            if (msg && msg.type === "TOGGLE_FLASH") {
+              flashAllume = !flashAllume;
+              try {
+                await trackVideo.applyConstraints({
+                  advanced: [{ torch: flashAllume }]
+                });
+              } catch (e) {
+                console.warn("Flash non supporté sur cet appareil", e);
+              }
+            }
+          });
 
           const canvas = document.getElementById("canvas");
           const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -120,23 +275,20 @@
           setInterval(() => {
             if (video.readyState < 2) return;
 
-            // Analyse à 128x96 pixels
             ctx.drawImage(video, 0, 0, 128, 96);
             const imageActuelle = ctx.getImageData(0, 0, 128, 96).data;
 
             if (dernierFlux) {
               let scoreDiff = 0;
               for (let i = 0; i < imageActuelle.length; i += 4) {
-                // Seuil de variation réduit à 25 pour capter les mouvements discrets
                 const diff = Math.abs(imageActuelle[i] - dernierFlux[i]);
                 if (diff > 25) scoreDiff++;
               }
 
-              // Déclenchement plus sensible (à partir de 50 pixels modifiés)
               if (scoreDiff > 50 && !antiSpam) {
                 antiSpam = true;
-                status.innerHTML = "<span class='alert'>⚠️ Mouvement éloigné détecté !</span>";
-                conn.send("MOUVEMENT");
+                status.innerHTML = "<span class='alert'>⚠️ Mouvement détecté ! Signal envoyé...</span>";
+                conn.send({ type: "MOUVEMENT" });
 
                 setTimeout(() => {
                   antiSpam = false;
@@ -148,6 +300,21 @@
           }, 150);
         });
       });
+    }
+
+    function envoyerBatterie(conn) {
+      if (navigator.getBattery) {
+        navigator.getBattery().then((battery) => {
+          const update = () => {
+            conn.send({
+              type: "BATTERY",
+              level: Math.round(battery.level * 100)
+            });
+          };
+          update();
+          battery.addEventListener("levelchange", update);
+        });
+      }
     }
   </script>
 </body>
