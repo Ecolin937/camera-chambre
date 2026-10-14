@@ -94,13 +94,14 @@
     <button class="btn-pc" onclick="demarrerPC()">💻 Mode PC (Écran de contrôle)</button>
   </div>
 
+  <!-- Commandes sur le PC -->
   <div id="pc-controls" style="display:none; margin-bottom: 10px;">
     <button id="btn-toggle-sound" class="btn-ctrl" onclick="toggleSon()">🔊 Son : Activé</button>
+    <button id="btn-toggle-flash-ecran" class="btn-ctrl" onclick="toggleFlashEcran()">🚨 Flash écran : Activé</button>
   </div>
 
   <div id="status">Choisis un mode pour commencer</div>
 
-  <!-- Conteneur caméra locale -->
   <div id="local-preview" style="display:none; max-width: 400px; margin: 0 auto;">
     <div class="video-wrapper">
       <video id="flux-local" autoplay playsinline muted></video>
@@ -120,6 +121,7 @@
     let pcAudioStream = null;
 
     let sonActive = true;
+    let flashEcranActive = true;
 
     function jouerBip() {
       if (!sonActive) return;
@@ -133,6 +135,7 @@
     }
 
     function declencherFlashEcran() {
+      if (!flashEcranActive) return;
       const overlay = document.getElementById("red-overlay");
       overlay.classList.add("flash-active");
       setTimeout(() => overlay.classList.remove("flash-active"), 200);
@@ -145,6 +148,13 @@
       const btn = document.getElementById("btn-toggle-sound");
       btn.innerText = sonActive ? "🔊 Son : Activé" : "🔇 Son : Coupé";
       btn.classList.toggle("btn-disabled", !sonActive);
+    }
+
+    function toggleFlashEcran() {
+      flashEcranActive = !flashEcranActive;
+      const btn = document.getElementById("btn-toggle-flash-ecran");
+      btn.innerText = flashEcranActive ? "🚨 Flash écran : Activé" : "⚪ Flash écran : Désactivé";
+      btn.classList.toggle("btn-disabled", !flashEcranActive);
     }
 
     function rafraichirOverlay(peerId, box) {
@@ -205,9 +215,7 @@
       }
     }
 
-    // ==============================================================
-    // ========================== MODE PC ===========================
-    // ==============================================================
+    // ====================== MODE PC ======================
     function demarrerPC() {
       document.getElementById("setup").style.display = "none";
       document.getElementById("pc-controls").style.display = "block";
@@ -312,7 +320,6 @@
       }
     }
 
-    // Gestion de l'interphone bidirectionnel
     async function basculerInterphone(peerId) {
       const conn = connections[peerId];
       const btn = document.getElementById(`btn-intercom-${peerId}`);
@@ -324,23 +331,18 @@
           if (!pcAudioStream) {
             pcAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
           }
-          // Appelle le téléphone pour lui envoyer la voix du PC
           const audioCall = peer.call(peerId, pcAudioStream);
           activeIntercoms[peerId] = audioCall;
 
-          // Débloque le son reçu du téléphone sur le PC
           if (vid) vid.muted = false;
-
-          // Active le micro sur le téléphone
           conn.send({ type: "INTERCOM_STATE", active: true });
 
           btn.innerText = "🎙️ Interphone : ACTIF";
           btn.style.background = "#ef4444";
         } catch (err) {
-          alert("Impossible d'accéder au microphone du PC : " + err.message);
+          alert("Microphone du PC inaccessible : " + err.message);
         }
       } else {
-        // Coupure de l'interphone
         if (activeIntercoms[peerId]) {
           activeIntercoms[peerId].close();
           delete activeIntercoms[peerId];
@@ -431,9 +433,7 @@
       rafraichirOverlay(peerId, null);
     }
 
-    // ==============================================================
-    // =================== MODE CAMÉRA (TÉL / TAB) ==================
-    // ==============================================================
+    // ====================== MODE CAMÉRA ======================
     let trackVideo = null;
     let flashAllume = false;
     let dernierFlux = null;
@@ -450,7 +450,6 @@
       const video = document.getElementById("flux-local");
       video.muted = true;
 
-      // Accès vidéo ET audio (micro coupé par défaut pour la veille)
       localStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: true
@@ -489,7 +488,6 @@
               masqueIgnore = msg.mask;
             }
 
-            // Ordre d'allumage/coupure du micro reçu du PC
             if (msg && msg.type === "INTERCOM_STATE") {
               if (localStream) {
                 localStream.getAudioTracks().forEach(t => t.enabled = msg.active);
@@ -497,7 +495,6 @@
             }
           });
 
-          // Écoute des appels audio du PC (voix de l'interphone)
           peer.on("call", (incomingCall) => {
             incomingCall.answer();
             incomingCall.on("stream", (remoteAudio) => {
