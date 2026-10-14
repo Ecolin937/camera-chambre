@@ -94,7 +94,6 @@
     <button class="btn-pc" onclick="demarrerPC()">💻 Mode PC (Écran de contrôle)</button>
   </div>
 
-  <!-- Commandes sur le PC -->
   <div id="pc-controls" style="display:none; margin-bottom: 10px;">
     <button id="btn-toggle-sound" class="btn-ctrl" onclick="toggleSon()">🔊 Son : Activé</button>
     <button id="btn-toggle-flash-ecran" class="btn-ctrl" onclick="toggleFlashEcran()">🚨 Flash écran : Activé</button>
@@ -157,7 +156,7 @@
       btn.classList.toggle("btn-disabled", !flashEcranActive);
     }
 
-    function rafraichirOverlay(peerId, box) {
+    function rafraichirOverlay(peerId) {
       const canvasOverlay = document.getElementById(`overlay-${peerId}`);
       if (!canvasOverlay) return;
       const ctx = canvasOverlay.getContext("2d");
@@ -185,33 +184,6 @@
         ctx.fillStyle = "#818cf8";
         ctx.font = "12px sans-serif";
         ctx.fillText("Zone ignorée", mx + 5, my + 15);
-      }
-
-      if (box) {
-        const x = box.minX * scaleX;
-        const y = box.minY * scaleY;
-        const w = (box.maxX - box.minX) * scaleX;
-        const h = (box.maxY - box.minY) * scaleY;
-
-        ctx.strokeStyle = "#ff3333";
-        ctx.lineWidth = 3;
-        ctx.strokeRect(x, y, w, h);
-
-        const corner = Math.min(12, w / 4, h / 4);
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 2;
-
-        ctx.beginPath();
-        ctx.moveTo(x, y + corner); ctx.lineTo(x, y); ctx.lineTo(x + corner, y);
-        ctx.moveTo(x + w - corner, y); ctx.lineTo(x + w); ctx.lineTo(x + w, y + corner);
-        ctx.moveTo(x, y + h - corner); ctx.lineTo(x, y + h); ctx.lineTo(x + corner, y + h);
-        ctx.moveTo(x + w - corner, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - corner);
-        ctx.stroke();
-
-        clearTimeout(canvasOverlay.clearTimer);
-        canvasOverlay.clearTimer = setTimeout(() => {
-          rafraichirOverlay(peerId, null);
-        }, 1000);
       }
     }
 
@@ -252,10 +224,6 @@
             status.innerHTML = `<span class='alert'>🚨 MOUVEMENT SUR : ${nomAppareil} !</span>`;
             jouerBip();
             declencherFlashEcran();
-
-            if (data.box) {
-              rafraichirOverlay(peerId, data.box);
-            }
 
             setTimeout(() => {
               status.innerText = "💻 Surveillance active...";
@@ -389,7 +357,7 @@
         const curX = e.clientX - rect.left;
         const curY = e.clientY - rect.top;
 
-        rafraichirOverlay(peerId, null);
+        rafraichirOverlay(peerId);
         const ctx = canvas.getContext("2d");
         ctx.strokeStyle = "#818cf8";
         ctx.lineWidth = 2;
@@ -421,7 +389,7 @@
         }
 
         activerDessinMasque(peerId);
-        rafraichirOverlay(peerId, null);
+        rafraichirOverlay(peerId);
       });
     }
 
@@ -430,7 +398,7 @@
       if (connections[peerId]) {
         connections[peerId].send({ type: "SET_MASK", mask: null });
       }
-      rafraichirOverlay(peerId, null);
+      rafraichirOverlay(peerId);
     }
 
     // ====================== MODE CAMÉRA ======================
@@ -519,7 +487,6 @@
 
             if (dernierFlux) {
               let scoreDiff = 0;
-              let minX = W, maxX = 0, minY = H, maxY = 0;
 
               for (let i = 0; i < imageActuelle.length; i += 4) {
                 const diff = Math.abs(imageActuelle[i] - dernierFlux[i]);
@@ -536,10 +503,6 @@
                   }
 
                   scoreDiff++;
-                  if (px < minX) minX = px;
-                  if (px > maxX) maxX = px;
-                  if (py < minY) minY = py;
-                  if (py > maxY) maxY = py;
                 }
               }
 
@@ -547,10 +510,7 @@
                 antiSpam = true;
                 status.innerHTML = "<span class='alert'>⚠️ Mouvement détecté ! Signal envoyé...</span>";
                 
-                conn.send({
-                  type: "MOUVEMENT",
-                  box: { minX, maxX, minY, maxY }
-                });
+                conn.send({ type: "MOUVEMENT" });
 
                 setTimeout(() => {
                   antiSpam = false;
