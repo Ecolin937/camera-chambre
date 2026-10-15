@@ -16,71 +16,46 @@
     .btn-reset-mask { background: #4b5563; color: #fff; padding: 8px 14px; font-size: 14px; }
     .btn-ctrl { background: #374151; color: #fff; padding: 10px 16px; font-size: 14px; }
     .btn-disabled { background: #991b1b !important; }
-    #status { font-size: 18px; margin: 15px 0; font-weight: bold; word-break: break-word; }
+    #status { font-size: 18px; margin: 15px 0; font-weight: bold; }
     .alert { color: #ff3333; }
+    
+    .pin-box {
+      font-size: 32px;
+      letter-spacing: 4px;
+      font-weight: bold;
+      color: #10b981;
+      background: #1e1e1e;
+      display: inline-block;
+      padding: 10px 20px;
+      border-radius: 8px;
+      margin: 10px 0;
+    }
+    input[type="number"] {
+      font-size: 20px;
+      padding: 10px;
+      width: 140px;
+      text-align: center;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background: #222;
+      color: #fff;
+    }
 
     #red-overlay {
       position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
+      top: 0; left: 0; width: 100vw; height: 100vh;
       background: rgba(255, 60, 60, 0.35);
-      pointer-events: none;
-      opacity: 0;
-      z-index: 9999;
+      pointer-events: none; opacity: 0; z-index: 9999;
       transition: opacity 0.15s ease-in-out;
     }
-    .flash-active {
-      opacity: 1 !important;
-    }
-    
-    #cameras-grid {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 20px;
-      margin-top: 20px;
-    }
-    .cam-card {
-      background: #1e1e1e;
-      border: 1px solid #333;
-      border-radius: 12px;
-      padding: 12px;
-      width: 90%;
-      max-width: 480px;
-    }
-    .cam-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
-      font-size: 14px;
-      color: #aaa;
-    }
-    
-    .video-wrapper {
-      position: relative;
-      width: 100%;
-      border-radius: 8px;
-      overflow: hidden;
-      background: #000;
-      aspect-ratio: 4 / 3;
-    }
-    .video-wrapper video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-    .video-wrapper canvas.overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      cursor: default;
-    }
+    .flash-active { opacity: 1 !important; }
+
+    #cameras-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin-top: 20px; }
+    .cam-card { background: #1e1e1e; border: 1px solid #333; border-radius: 12px; padding: 12px; width: 90%; max-width: 480px; }
+    .cam-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 14px; color: #aaa; }
+    .video-wrapper { position: relative; width: 100%; border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 4 / 3; }
+    .video-wrapper video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .video-wrapper canvas.overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: default; }
   </style>
 </head>
 <body>
@@ -90,8 +65,13 @@
   <h1>📹 Surveillance Multi-Caméras</h1>
 
   <div id="setup">
-    <button class="btn-cam" onclick="demarrerCamera()">📱/📟 Mode Caméra (Téléphone ou Tablette)</button>
     <button class="btn-pc" onclick="demarrerPC()">💻 Mode PC (Écran de contrôle)</button>
+    <br><br>
+    <div style="border-top: 1px solid #333; padding-top: 15px; max-width: 350px; margin: 0 auto;">
+      <p style="margin: 0 0 10px 0; color: #aaa;">Pour le téléphone ou la tablette :</p>
+      <input type="number" id="input-pin" placeholder="Code PC" /><br>
+      <button class="btn-cam" onclick="demarrerCamera()">📱 Démarrer Caméra</button>
+    </div>
   </div>
 
   <div id="pc-controls" style="display:none; margin-bottom: 10px;">
@@ -112,8 +92,6 @@
   <div id="cameras-grid" style="display:none;"></div>
 
   <script>
-    const ROOM_ID = "alarme-chambre-perso-2026-v2";
-    
     const PEER_CONFIG = {
       config: {
         iceServers: [
@@ -143,7 +121,7 @@
         osc.start();
         osc.stop(audioCtx.currentTime + 0.35);
       } catch (e) {
-        console.warn("Audio context non prêt :", e);
+        console.warn(e);
       }
     }
 
@@ -178,8 +156,8 @@
 
       const scaleX = canvasOverlay.width / 128;
       const scaleY = canvasOverlay.height / 96;
-
       const mask = masks[peerId];
+
       if (mask) {
         ctx.fillStyle = "rgba(100, 100, 100, 0.45)";
         ctx.strokeStyle = "#818cf8";
@@ -201,19 +179,24 @@
       }
     }
 
-    // ==========================================
-    // ================ MODE PC =================
-    // ==========================================
+    // ====================== MODE PC ======================
     function demarrerPC() {
       document.getElementById("setup").style.display = "none";
       document.getElementById("pc-controls").style.display = "block";
       document.getElementById("cameras-grid").style.display = "flex";
       const status = document.getElementById("status");
-      status.innerText = "💻 En attente de connexion des appareils...";
 
       jouerBip();
 
-      peer = new Peer(ROOM_ID, PEER_CONFIG);
+      // Génère un code aléatoire à 4 chiffres
+      const codePin = Math.floor(1000 + Math.random() * 9000).toString();
+      const pcId = "cam-pc-" + codePin;
+
+      peer = new Peer(pcId, PEER_CONFIG);
+
+      peer.on("open", () => {
+        status.innerHTML = `💻 Ton code de connexion :<br><div class="pin-box">${codePin}</div><br><span style="font-size:14px; color:#aaa;">Tape ce code sur ton téléphone</span>`;
+      });
 
       peer.on("call", (call) => {
         const peerId = call.peer;
@@ -221,7 +204,6 @@
 
         call.on("stream", (remoteStream) => {
           creerOuMettreAJourEcran(peerId, remoteStream);
-          status.innerText = "💻 Surveillance active. Appareils connectés !";
         });
       });
 
@@ -242,7 +224,7 @@
             declencherFlashEcran();
 
             setTimeout(() => {
-              status.innerText = "💻 Surveillance active...";
+              status.innerHTML = `💻 Connecté sous le code : <b>${codePin}</b>`;
             }, 2500);
           }
         });
@@ -257,15 +239,6 @@
           delete connections[peerId];
           delete masks[peerId];
         });
-      });
-
-      peer.on("error", (err) => {
-        console.error(err);
-        if (err.type === "unavailable-id") {
-          status.innerText = "⚠️ Erreur : cet identifiant est encore occupé sur le serveur. Actualise dans 15 secondes.";
-        } else {
-          status.innerText = "⚠️ Erreur PeerJS PC : " + err.type;
-        }
       });
     }
 
@@ -298,13 +271,11 @@
       }
       const vid = document.getElementById(`video-${peerId}`);
       vid.srcObject = stream;
-      vid.play().catch(e => console.log("Lecture vidéo auto :", e));
+      vid.play().catch(e => console.log(e));
     }
 
     function basculerFlash(peerId) {
-      if (connections[peerId]) {
-        connections[peerId].send({ type: "TOGGLE_FLASH" });
-      }
+      if (connections[peerId]) connections[peerId].send({ type: "TOGGLE_FLASH" });
     }
 
     async function basculerInterphone(peerId) {
@@ -320,14 +291,12 @@
           }
           const audioCall = peer.call(peerId, pcAudioStream);
           activeIntercoms[peerId] = audioCall;
-
           if (vid) vid.muted = false;
           conn.send({ type: "INTERCOM_STATE", active: true });
-
           btn.innerText = "🎙️ Interphone : ACTIF";
           btn.style.background = "#ef4444";
         } catch (err) {
-          alert("Microphone du PC inaccessible : " + err.message);
+          alert("Micro inaccessible : " + err.message);
         }
       } else {
         if (activeIntercoms[peerId]) {
@@ -336,7 +305,6 @@
         }
         if (vid) vid.muted = true;
         conn.send({ type: "INTERCOM_STATE", active: false });
-
         btn.innerText = "🎙️ Interphone : OFF";
         btn.style.background = "#0284c7";
       }
@@ -359,224 +327,4 @@
     }
 
     function initialiserTracerMasque(peerId) {
-      const canvas = document.getElementById(`overlay-${peerId}`);
-      let debutX, debutY, glisse = false;
-
-      canvas.addEventListener("mousedown", (e) => {
-        if (!modeTracerActif[peerId]) return;
-        const rect = canvas.getBoundingClientRect();
-        debutX = e.clientX - rect.left;
-        debutY = e.clientY - rect.top;
-        glisse = true;
-      });
-
-      canvas.addEventListener("mousemove", (e) => {
-        if (!glisse || !modeTracerActif[peerId]) return;
-        const rect = canvas.getBoundingClientRect();
-        const curX = e.clientX - rect.left;
-        const curY = e.clientY - rect.top;
-
-        rafraichirOverlay(peerId);
-        const ctx = canvas.getContext("2d");
-        ctx.strokeStyle = "#818cf8";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(debutX, debutY, curX - debutX, curY - debutY);
-      });
-
-      canvas.addEventListener("mouseup", (e) => {
-        if (!glisse || !modeTracerActif[peerId]) return;
-        glisse = false;
-        const rect = canvas.getBoundingClientRect();
-        const finX = e.clientX - rect.left;
-        const finY = e.clientY - rect.top;
-
-        const scaleX = 128 / canvas.width;
-        const scaleY = 96 / canvas.height;
-
-        const x1 = Math.min(debutX, finX) * scaleX;
-        const x2 = Math.max(debutX, finX) * scaleX;
-        const y1 = Math.min(debutY, finY) * scaleY;
-        const y2 = Math.max(debutY, finY) * scaleY;
-
-        masks[peerId] = { minX: x1, maxX: x2, minY: y1, maxY: y2 };
-
-        if (connections[peerId]) {
-          connections[peerId].send({
-            type: "SET_MASK",
-            mask: masks[peerId]
-          });
-        }
-
-        activerDessinMasque(peerId);
-        rafraichirOverlay(peerId);
-      });
-    }
-
-    function effacerMasque(peerId) {
-      delete masks[peerId];
-      if (connections[peerId]) {
-        connections[peerId].send({ type: "SET_MASK", mask: null });
-      }
-      rafraichirOverlay(peerId);
-    }
-
-    // ==========================================
-    // ============= MODE CAMÉRA ================
-    // ==========================================
-    let trackVideo = null;
-    let flashAllume = false;
-    let dernierFlux = null;
-    let antiSpam = false;
-    let masqueIgnore = null;
-    let localStream = null;
-
-    async function demarrerCamera() {
-      const status = document.getElementById("status");
-      try {
-        document.getElementById("setup").style.display = "none";
-        document.getElementById("local-preview").style.display = "block";
-        status.innerText = "📱 1/3 Demande accès caméra/micro...";
-
-        const video = document.getElementById("flux-local");
-        video.muted = true;
-
-        localStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-          audio: true
-        });
-        localStream.getAudioTracks().forEach(t => t.enabled = false);
-
-        video.srcObject = localStream;
-        trackVideo = localStream.getVideoTracks()[0];
-
-        status.innerText = "📱 2/3 Connexion au serveur PeerJS...";
-
-        peer = new Peer(undefined, PEER_CONFIG);
-
-        peer.on("open", (id) => {
-          status.innerText = "📱 3/3 Connecté ! Appel du PC en cours...";
-
-          const conn = peer.connect(ROOM_ID, { reliable: true });
-
-          conn.on("open", () => {
-            status.innerText = "📱 Connecté au PC ! Envoi de la vidéo...";
-            peer.call(ROOM_ID, localStream);
-
-            setTimeout(() => {
-              status.innerText = "📱 En direct ! Pose l'appareil face à la zone.";
-            }, 1000);
-
-            envoyerBatterie(conn);
-
-            conn.on("data", async (msg) => {
-              if (msg && msg.type === "TOGGLE_FLASH") {
-                flashAllume = !flashAllume;
-                try {
-                  await trackVideo.applyConstraints({
-                    advanced: [{ torch: flashAllume }]
-                  });
-                } catch (e) {
-                  console.warn("Flash non supporté", e);
-                }
-              }
-
-              if (msg && msg.type === "SET_MASK") {
-                masqueIgnore = msg.mask;
-              }
-
-              if (msg && msg.type === "INTERCOM_STATE") {
-                if (localStream) {
-                  localStream.getAudioTracks().forEach(t => t.enabled = msg.active);
-                }
-              }
-            });
-
-            peer.on("call", (incomingCall) => {
-              incomingCall.answer();
-              incomingCall.on("stream", (remoteAudio) => {
-                const audioEl = document.getElementById("audio-retour");
-                if (audioEl) {
-                  audioEl.srcObject = remoteAudio;
-                  audioEl.play().catch(e => console.warn(e));
-                }
-              });
-            });
-
-            const canvas = document.getElementById("canvas-analysis");
-            const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
-            setInterval(() => {
-              if (video.readyState < 2) return;
-
-              const W = 128;
-              const H = 96;
-              ctx.drawImage(video, 0, 0, W, H);
-              const imageActuelle = ctx.getImageData(0, 0, W, H).data;
-
-              if (dernierFlux) {
-                let scoreDiff = 0;
-
-                for (let i = 0; i < imageActuelle.length; i += 4) {
-                  const diff = Math.abs(imageActuelle[i] - dernierFlux[i]);
-                  if (diff > 25) {
-                    const pixelIndex = i / 4;
-                    const px = pixelIndex % W;
-                    const py = Math.floor(pixelIndex / W);
-
-                    if (masqueIgnore) {
-                      if (px >= masqueIgnore.minX && px <= masqueIgnore.maxX &&
-                          py >= masqueIgnore.minY && py <= masqueIgnore.maxY) {
-                        continue;
-                      }
-                    }
-
-                    scoreDiff++;
-                  }
-                }
-
-                if (scoreDiff > 50 && !antiSpam) {
-                  antiSpam = true;
-                  status.innerHTML = "<span class='alert'>⚠️ Mouvement détecté ! Signal envoyé...</span>";
-                  conn.send({ type: "MOUVEMENT" });
-
-                  setTimeout(() => {
-                    antiSpam = false;
-                    status.innerText = "📱 En direct. Surveillance active...";
-                  }, 2000);
-                }
-              }
-              dernierFlux = imageActuelle;
-            }, 150);
-          });
-
-          conn.on("error", (err) => {
-            status.innerText = "⚠️ Erreur liaison données PC : " + err;
-          });
-        });
-
-        peer.on("error", (err) => {
-          status.innerText = "⚠️ Erreur PeerJS téléphone : " + err.type;
-        });
-
-      } catch (err) {
-        status.innerText = "⚠️ Erreur démarrage caméra : " + err.message;
-      }
-    }
-
-    function envoyerBatterie(conn) {
-      if (navigator.getBattery) {
-        navigator.getBattery().then((battery) => {
-          const update = () => {
-            conn.send({
-              type: "BATTERY",
-              level: Math.round(battery.level * 100)
-            });
-          };
-          update();
-          battery.addEventListener("levelchange", update);
-        });
-      }
-    }
-  </script>
-</body>
-</html>
+      const canvas = document.
