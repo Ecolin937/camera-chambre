@@ -113,6 +113,17 @@
 
   <script>
     const ROOM_ID = "alarme-chambre-perso-2026";
+    
+    // Serveurs STUN de Google pour traverser la box (Câble Ethernet <-> Wi-Fi)
+    const PEER_CONFIG = {
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" }
+        ]
+      }
+    };
+
     let peer = null;
     const connections = {};
     const masks = {};
@@ -197,7 +208,7 @@
 
       jouerBip();
 
-      peer = new Peer(ROOM_ID);
+      peer = new Peer(ROOM_ID, PEER_CONFIG);
 
       peer.on("call", (call) => {
         const peerId = call.peer;
@@ -280,6 +291,7 @@
       }
       const vid = document.getElementById(`video-${peerId}`);
       vid.srcObject = stream;
+      vid.play().catch(e => console.log("Lecture automatique :", e));
     }
 
     function basculerFlash(peerId) {
@@ -334,210 +346,3 @@
         cvs.style.cursor = "crosshair";
       } else {
         btn.innerText = "🚫 Définir zone ignorée";
-        btn.style.background = "#6366f1";
-        cvs.style.cursor = "default";
-      }
-    }
-
-    function initialiserTracerMasque(peerId) {
-      const canvas = document.getElementById(`overlay-${peerId}`);
-      let debutX, debutY, glisse = false;
-
-      canvas.addEventListener("mousedown", (e) => {
-        if (!modeTracerActif[peerId]) return;
-        const rect = canvas.getBoundingClientRect();
-        debutX = e.clientX - rect.left;
-        debutY = e.clientY - rect.top;
-        glisse = true;
-      });
-
-      canvas.addEventListener("mousemove", (e) => {
-        if (!glisse || !modeTracerActif[peerId]) return;
-        const rect = canvas.getBoundingClientRect();
-        const curX = e.clientX - rect.left;
-        const curY = e.clientY - rect.top;
-
-        rafraichirOverlay(peerId);
-        const ctx = canvas.getContext("2d");
-        ctx.strokeStyle = "#818cf8";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(debutX, debutY, curX - debutX, curY - debutY);
-      });
-
-      canvas.addEventListener("mouseup", (e) => {
-        if (!glisse || !modeTracerActif[peerId]) return;
-        glisse = false;
-        const rect = canvas.getBoundingClientRect();
-        const finX = e.clientX - rect.left;
-        const finY = e.clientY - rect.top;
-
-        const scaleX = 128 / canvas.width;
-        const scaleY = 96 / canvas.height;
-
-        const x1 = Math.min(debutX, finX) * scaleX;
-        const x2 = Math.max(debutX, finX) * scaleX;
-        const y1 = Math.min(debutY, finY) * scaleY;
-        const y2 = Math.max(debutY, finY) * scaleY;
-
-        masks[peerId] = { minX: x1, maxX: x2, minY: y1, maxY: y2 };
-
-        if (connections[peerId]) {
-          connections[peerId].send({
-            type: "SET_MASK",
-            mask: masks[peerId]
-          });
-        }
-
-        activerDessinMasque(peerId);
-        rafraichirOverlay(peerId);
-      });
-    }
-
-    function effacerMasque(peerId) {
-      delete masks[peerId];
-      if (connections[peerId]) {
-        connections[peerId].send({ type: "SET_MASK", mask: null });
-      }
-      rafraichirOverlay(peerId);
-    }
-
-    // ====================== MODE CAMÉRA ======================
-    let trackVideo = null;
-    let flashAllume = false;
-    let dernierFlux = null;
-    let antiSpam = false;
-    let masqueIgnore = null;
-    let localStream = null;
-
-    async function demarrerCamera() {
-      document.getElementById("setup").style.display = "none";
-      document.getElementById("local-preview").style.display = "block";
-      const status = document.getElementById("status");
-      status.innerText = "📱 Connexion en cours...";
-
-      const video = document.getElementById("flux-local");
-      video.muted = true;
-
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: true
-      });
-      localStream.getAudioTracks().forEach(t => t.enabled = false);
-
-      video.srcObject = localStream;
-      trackVideo = localStream.getVideoTracks()[0];
-
-      peer = new Peer();
-
-      peer.on("open", () => {
-        status.innerText = "📱 Relié au réseau. Appel du PC...";
-
-        peer.call(ROOM_ID, localStream);
-        const conn = peer.connect(ROOM_ID);
-
-        conn.on("open", () => {
-          status.innerText = "📱 En direct ! Pose l'appareil face à la zone.";
-
-          envoyerBatterie(conn);
-
-          conn.on("data", async (msg) => {
-            if (msg && msg.type === "TOGGLE_FLASH") {
-              flashAllume = !flashAllume;
-              try {
-                await trackVideo.applyConstraints({
-                  advanced: [{ torch: flashAllume }]
-                });
-              } catch (e) {
-                console.warn("Flash non supporté", e);
-              }
-            }
-
-            if (msg && msg.type === "SET_MASK") {
-              masqueIgnore = msg.mask;
-            }
-
-            if (msg && msg.type === "INTERCOM_STATE") {
-              if (localStream) {
-                localStream.getAudioTracks().forEach(t => t.enabled = msg.active);
-              }
-            }
-          });
-
-          peer.on("call", (incomingCall) => {
-            incomingCall.answer();
-            incomingCall.on("stream", (remoteAudio) => {
-              const audioEl = document.getElementById("audio-retour");
-              if (audioEl) {
-                audioEl.srcObject = remoteAudio;
-                audioEl.play().catch(e => console.warn(e));
-              }
-            });
-          });
-
-          const canvas = document.getElementById("canvas-analysis");
-          const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
-          setInterval(() => {
-            if (video.readyState < 2) return;
-
-            const W = 128;
-            const H = 96;
-            ctx.drawImage(video, 0, 0, W, H);
-            const imageActuelle = ctx.getImageData(0, 0, W, H).data;
-
-            if (dernierFlux) {
-              let scoreDiff = 0;
-
-              for (let i = 0; i < imageActuelle.length; i += 4) {
-                const diff = Math.abs(imageActuelle[i] - dernierFlux[i]);
-                if (diff > 25) {
-                  const pixelIndex = i / 4;
-                  const px = pixelIndex % W;
-                  const py = Math.floor(pixelIndex / W);
-
-                  if (masqueIgnore) {
-                    if (px >= masqueIgnore.minX && px <= masqueIgnore.maxX &&
-                        py >= masqueIgnore.minY && py <= masqueIgnore.maxY) {
-                      continue;
-                    }
-                  }
-
-                  scoreDiff++;
-                }
-              }
-
-              if (scoreDiff > 50 && !antiSpam) {
-                antiSpam = true;
-                status.innerHTML = "<span class='alert'>⚠️ Mouvement détecté ! Signal envoyé...</span>";
-                
-                conn.send({ type: "MOUVEMENT" });
-
-                setTimeout(() => {
-                  antiSpam = false;
-                  status.innerText = "📱 En direct. Surveillance active...";
-                }, 2000);
-              }
-            }
-            dernierFlux = imageActuelle;
-          }, 150);
-        });
-      });
-    }
-
-    function envoyerBatterie(conn) {
-      if (navigator.getBattery) {
-        navigator.getBattery().then((battery) => {
-          const update = () => {
-            conn.send({
-              type: "BATTERY",
-              level: Math.round(battery.level * 100)
-            });
-          };
-          update();
-          battery.addEventListener("levelchange", update);
-        });
-      }
-    }
-  </script>
-</body>
-</html>
